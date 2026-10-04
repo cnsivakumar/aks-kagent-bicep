@@ -1,0 +1,22 @@
+apiVersion: kagent.dev/v1alpha3
+kind: ModelConfig
+
+metadata:
+  name: azure-openai-model-config
+  namespace: kagent
+
+spec:
+  apiKeySecret: azure-openai-api-key
+  apiKeySecretKey: api-key
+
+  model: gpt-4o-mini
+
+  provider: AzureOpenAI
+
+  azureOpenAI:
+    azureEndpoint: "https://YOUR-AZURE-OPENAI.openai.azure.com/"
+    apiVersion: "2025-03-01-preview"
+    azureDeployment: "gpt-4o-mini"
+
+    temperature: 0.2
+    maxTokens: 4096

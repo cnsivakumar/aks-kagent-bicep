@@ -1,0 +1,46 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+
+  "parameters": {
+    "location": {
+      "value": "eastus"
+    },
+
+    "resourceGroupName": {
+      "value": "rg-kagent-aks"
+    },
+
+    "aksName": {
+      "value": "aks-kagent-demo"
+    },
+
+    "acrName": {
+      "value": "kagentacr123456"
+    },
+
+    "githubOrganization": {
+      "value": "YOUR_GITHUB_ORG"
+    },
+
+    "githubRepository": {
+      "value": "kagent-aks"
+    },
+
+    "githubBranch": {
+      "value": "main"
+    },
+
+    "kubernetesVersion": {
+      "value": "1.37"
+    },
+
+    "nodeVmSize": {
+      "value": "Standard_D4s_v5"
+    },
+
+    "nodeCount": {
+      "value": 3
+    }
+  }
+}
