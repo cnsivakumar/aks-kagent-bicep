@@ -18,7 +18,6 @@ param systemNodeMaxCount int = 2
 param enableMonitoring bool = false
 @description('ACR is not needed unless you build custom agent/tool images. kagent pulls from ghcr.io.')
 param deployAcr bool = false
-param logDailyCapGb int = 1
 
 param deployerPrincipalId string
 
@@ -70,7 +69,6 @@ module aks 'modules/aks.bicep' = {
     location: location
     tags: tags
     subnetId: network.outputs.aksSubnetId
-    enableMonitoring: enableMonitoring
     logAnalyticsId: enableMonitoring ? monitoring!.outputs.workspaceId : ''
     kubernetesVersion: kubernetesVersion
     nodeVmSize: systemNodeVmSize
