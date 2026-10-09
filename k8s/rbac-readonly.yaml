@@ -1,0 +1,49 @@
+# Cluster-wide READ-ONLY access for the kagent tool-server identity.
+# No secrets, no pods/exec, no write verbs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kagent-diagnostics-readonly
+rules:
+  - apiGroups: [""]
+    resources: [pods, pods/log, services, endpoints, events, nodes, namespaces,
+                configmaps, persistentvolumeclaims, persistentvolumes,
+                resourcequotas, limitranges, replicationcontrollers]
+    verbs: [get, list, watch]
+  - apiGroups: ["events.k8s.io"]
+    resources: [events]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments, replicasets, statefulsets, daemonsets]
+    verbs: [get, list, watch]
+  - apiGroups: [batch]
+    resources: [jobs, cronjobs]
+    verbs: [get, list, watch]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses, networkpolicies]
+    verbs: [get, list, watch]
+  - apiGroups: [autoscaling]
+    resources: [horizontalpodautoscalers]
+    verbs: [get, list, watch]
+  - apiGroups: [policy]
+    resources: [poddisruptionbudgets]
+    verbs: [get, list, watch]
+  - apiGroups: [storage.k8s.io]
+    resources: [storageclasses]
+    verbs: [get, list, watch]
+  - apiGroups: [metrics.k8s.io]
+    resources: [pods, nodes]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kagent-diagnostics-readonly
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kagent-diagnostics-readonly
+subjects:
+  - kind: ServiceAccount
+    name: kagent-tools        # confirm the tool-server SA name: kubectl -n kagent get deploy,sa
+    namespace: kagent

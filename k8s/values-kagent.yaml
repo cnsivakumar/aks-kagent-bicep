@@ -1,0 +1,7 @@
+# Helm values for the kagent chart. Verify keys against your pinned version:
+#   helm show values oci://ghcr.io/kagent-dev/kagent/helm/kagent --version <ver>
+# The ModelConfig + Secret are created from k8s/modelconfig.yaml by the pipeline,
+# so no API key goes into Helm values.
+ui:
+  service:
+    type: ClusterIP        # keep private; reach it via port-forward / internal ingress

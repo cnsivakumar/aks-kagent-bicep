@@ -1,0 +1,46 @@
+# Stops the dev cluster outside working hours (no node VM charges while stopped).
+# Stop 20:00 IST, start 09:00 IST, Mon-Fri; weekends stay stopped.
+name: aks-schedule
+
+on:
+  schedule:
+    - cron: '30 14 * * 1-5'   # 20:00 IST -> stop
+    - cron: '30 3 * * 1-5'    # 09:00 IST -> start
+  workflow_dispatch:
+    inputs:
+      action:
+        type: choice
+        options: [start, stop]
+        default: start
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  RESOURCE_GROUP: rg-kagent-dev
+  AKS_NAME: aks-kagent-dev
+
+jobs:
+  power:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Start or stop
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            ACTION="${{ inputs.action }}"
+          elif [ "${{ github.event.schedule }}" = "30 14 * * 1-5" ]; then
+            ACTION=stop
+          else
+            ACTION=start
+          fi
+          STATE=$(az aks show -g "$RESOURCE_GROUP" -n "$AKS_NAME" --query powerState.code -o tsv)
+          echo "state=$STATE action=$ACTION"
+          if [ "$ACTION" = "stop" ] && [ "$STATE" = "Running" ]; then az aks stop  -g "$RESOURCE_GROUP" -n "$AKS_NAME"; fi
+          if [ "$ACTION" = "start" ] && [ "$STATE" = "Stopped" ]; then az aks start -g "$RESOURCE_GROUP" -n "$AKS_NAME"; fi

@@ -1,5 +1,0 @@
-credentialProvider:
-  namespacePolicies:
-    - atespace: kagent
-      allowedNamespaces:
-        - kagent

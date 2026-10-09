@@ -1,0 +1,32 @@
+# Narrow WRITE permissions, only in allow-listed workload namespaces.
+# Every write tool is ALSO gated by requireApproval on the Agent, so a human
+# must approve in the kagent UI before any of this is exercised.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kagent-remediation
+rules:
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets]
+    verbs: [get, list, patch]
+  - apiGroups: [apps]
+    resources: [deployments/scale, statefulsets/scale]
+    verbs: [get, patch, update]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [delete]          # restart a crash-looping pod
+---
+# One RoleBinding per namespace the agent may remediate in. Edit / duplicate.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kagent-remediation
+  namespace: apps
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kagent-remediation
+subjects:
+  - kind: ServiceAccount
+    name: kagent-tools
+    namespace: kagent

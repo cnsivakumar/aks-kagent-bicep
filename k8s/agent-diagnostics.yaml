@@ -1,0 +1,41 @@
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: aks-diagnostics
+  namespace: kagent
+spec:
+  description: Read-only AKS diagnostics agent. Proposes fixes; every change needs human approval.
+  type: Declarative
+  declarative:
+    modelConfig: azure-openai
+    systemMessage: |
+      You are an AKS SRE assistant.
+      1. Investigate using read tools only: resources, events, pod logs, describe.
+      2. Explain the likely root cause with the evidence (event, log line, resource state).
+      3. Propose remediation as exact steps / manifests, ranked by blast radius.
+      4. Never change anything unless the user asked for it; any write tool call
+         will pause for human approval. State exactly what it will change first.
+      5. Never request or print secrets. Prefer fixes that go through the Git repo / pipeline.
+    tools:
+      - type: McpServer
+        mcpServer:
+          apiGroup: kagent.dev
+          kind: RemoteMCPServer
+          name: kagent-tool-server
+          toolNames:
+            # read-only, run immediately
+            - k8s_get_resources
+            - k8s_get_available_api_resources
+            - k8s_get_cluster_configuration
+            - k8s_describe_resource
+            - k8s_get_events
+            - k8s_get_pod_logs
+            - k8s_check_service_connectivity
+            # workload-changing, paused until a human approves
+            - k8s_patch_resource
+            - k8s_scale
+            - k8s_delete_resource
+          requireApproval:
+            - k8s_patch_resource
+            - k8s_scale
+            - k8s_delete_resource
