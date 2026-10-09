@@ -1,0 +1,159 @@
+# Save as .github/workflows/kagent.yml
+name: kagent-aks
+
+on:
+  push:
+    branches: [main]
+    paths: ['infra/**', 'k8s/**', '.github/workflows/kagent.yml']
+  pull_request:
+    branches: [main]
+    paths: ['infra/**', 'k8s/**', '.github/workflows/kagent.yml']
+  workflow_dispatch:
+
+# OIDC to Azure (no stored secrets for the credential itself)
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: kagent-aks-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RESOURCE_GROUP: rg-kagent-dev
+  LOCATION: centralindia
+  DEPLOYMENT_NAME: kagent-infra
+  KAGENT_VERSION: '0.9.9'          # pin to the version you validated
+  KAGENT_TOOLS_SA: kagent-tools    # confirm after first install
+
+jobs:
+  # ---------------------------------------------------------------- CI
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Bicep build + lint
+        run: |
+          az bicep build --file infra/main.bicep --stdout > /dev/null
+          az bicep lint  --file infra/main.bicep
+
+      - name: What-if
+        run: |
+          az group create -n "$RESOURCE_GROUP" -l "$LOCATION" -o none
+          az deployment group what-if -g "$RESOURCE_GROUP" \
+            --parameters infra/main.dev.bicepparam
+
+      - name: Validate RBAC / namespace manifests
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz | tar xz
+          ./kubeconform -ignore-missing-schemas -summary k8s/rbac-*.yaml k8s/namespace.yaml
+
+  # ---------------------------------------------------------------- Infra CD
+  deploy-infra:
+    needs: validate
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: kagent-infra        # add required reviewers on this environment
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy Bicep
+        run: |
+          az deployment group create -g "$RESOURCE_GROUP" -n "$DEPLOYMENT_NAME" \
+            --parameters infra/main.dev.bicepparam -o none
+
+  # ---------------------------------------------------------------- App CD
+  deploy-app:
+    needs: deploy-infra
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: kagent-app          # add required reviewers on this environment
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install kubectl + kubelogin
+        run: |
+          mkdir -p "$HOME/bin"
+          az aks install-cli \
+            --install-location "$HOME/bin/kubectl" \
+            --kubelogin-install-location "$HOME/bin/kubelogin"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+      - name: Resolve infra outputs and connect to AKS
+        run: |
+          out() { az deployment group show -g "$RESOURCE_GROUP" -n "$DEPLOYMENT_NAME" \
+                    --query "properties.outputs.$1.value" -o tsv; }
+          AKS=$(out aksName)
+          {
+            echo "AKS=$AKS"
+            echo "OPENAI_NAME=$(out openAiName)"
+            echo "OPENAI_ENDPOINT=$(out openAiEndpoint)"
+            echo "OPENAI_DEPLOYMENT=$(out openAiDeployment)"
+            echo "OPENAI_MODEL=$(out openAiDeployment)"
+          } >> "$GITHUB_ENV"
+          az aks get-credentials -g "$RESOURCE_GROUP" -n "$AKS" --overwrite-existing
+          kubelogin convert-kubeconfig -l azurecli
+
+      - name: Install kagent, agent and RBAC
+        run: |
+          set -euo pipefail
+          kubectl apply -f k8s/namespace.yaml
+
+          # LLM key -> Kubernetes Secret (masked in logs)
+          KEY=$(az cognitiveservices account keys list -g "$RESOURCE_GROUP" -n "$OPENAI_NAME" --query key1 -o tsv)
+          echo "::add-mask::$KEY"
+          kubectl -n kagent create secret generic kagent-azure-openai \
+            --from-literal=AZUREOPENAI_API_KEY="$KEY" --dry-run=client -o yaml | kubectl apply -f -
+
+          # kagent (CRDs first, then app)
+          helm upgrade --install kagent-crds oci://ghcr.io/kagent-dev/kagent/helm/kagent-crds \
+            -n kagent --version "$KAGENT_VERSION" --wait
+          helm upgrade --install kagent oci://ghcr.io/kagent-dev/kagent/helm/kagent \
+            -n kagent --version "$KAGENT_VERSION" -f k8s/values-kagent.yaml --wait --timeout 10m
+
+          # Least-privilege RBAC + model + agent
+          kubectl apply -f k8s/rbac-readonly.yaml -f k8s/rbac-remediation.yaml
+          envsubst '${OPENAI_ENDPOINT} ${OPENAI_DEPLOYMENT} ${OPENAI_MODEL}' < k8s/modelconfig.yaml | kubectl apply -f -
+          kubectl apply -f k8s/agent-diagnostics.yaml
+
+      - name: RBAC guard (fail if tool identity is over-privileged)
+        run: |
+          set -uo pipefail
+          SA="system:serviceaccount:kagent:${KAGENT_TOOLS_SA}"
+          fail=0
+          mustnot() { [ "$(kubectl auth can-i "$@" --as="$SA" 2>/dev/null)" = "yes" ] && { echo "::error::$SA CAN: $*"; fail=1; }; true; }
+          must()    { [ "$(kubectl auth can-i "$@" --as="$SA" 2>/dev/null)" = "yes" ] || { echo "::error::$SA CANNOT: $*"; fail=1; }; }
+          must    get pods -A
+          must    get pods --subresource=log -A
+          must    list events -A
+          mustnot get secrets -A
+          mustnot create pods --subresource=exec -A
+          mustnot delete deployments -A
+          mustnot patch deployments -A
+          mustnot delete namespaces
+          mustnot create clusterrolebindings
+          exit $fail
+
+      - name: Smoke test
+        run: |
+          kubectl -n kagent rollout status deploy --timeout=300s
+          kubectl -n kagent get agent,modelconfig,remotemcpserver

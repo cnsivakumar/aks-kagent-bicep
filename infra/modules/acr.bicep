@@ -1,20 +1,15 @@
+param name string
 param location string
-param acrName string
+param tags object
 
-resource acr 'Microsoft.ContainerRegistry/registries@2025-11-01-preview' = {
-  name: acrName
+resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
+  name: name
   location: location
-
-  sku: {
-    name: 'Standard'
-  }
-
+  tags: tags
+  sku: { name: 'Basic' }
   properties: {
     adminUserEnabled: false
-    publicNetworkAccess: 'Enabled'
   }
 }
 
-output resourceId string = acr.id
-output acrName string = acr.name
-output loginServer string = acr.properties.loginServer
+output name string = acr.name

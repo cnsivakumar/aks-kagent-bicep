@@ -1,75 +1,109 @@
-targetScope = 'subscription'
+targetScope = 'resourceGroup'
 
-@description('Azure location')
-param location string = 'eastus'
+param workload string = 'kagent'
 
-@description('Resource group name')
-param resourceGroupName string = 'rg-kagent-aks'
+@allowed(['dev', 'test', 'prod'])
+param environment string = 'dev'
 
-@description('AKS cluster name')
-param aksName string = 'aks-kagent-demo'
+param location string = resourceGroup().location
+param openAiLocation string = location
+param kubernetesVersion string = ''
 
-@description('ACR name. Must be globally unique.')
-param acrName string = 'kagentacr${uniqueString(subscription().id)}'
+// ---- cost levers (dev defaults) ----
+@description('Burstable 2 vCPU / 8 GB. Verify availability: az vm list-skus -l <region> --size Standard_B2s_v2')
+param systemNodeVmSize string = 'Standard_B2s_v2'
+param systemNodeMinCount int = 1
+param systemNodeMaxCount int = 2
+@description('Container Insights ingestion is the usual surprise bill. Off for dev.')
+param enableMonitoring bool = false
+@description('ACR is not needed unless you build custom agent/tool images. kagent pulls from ghcr.io.')
+param deployAcr bool = false
+param logDailyCapGb int = 1
 
-@description('GitHub organization/user')
-param githubOrganization string
+param deployerPrincipalId string
 
-@description('GitHub repository')
-param githubRepository string
+param openAiModelName string = 'gpt-4.1-mini'
+param openAiModelVersion string = '2025-04-14'
+@description('Thousands of tokens/min. Standard is pay-per-token; a low cap also limits runaway spend.')
+param openAiCapacity int = 10
 
-@description('GitHub branch allowed to deploy')
-param githubBranch string = 'main'
-
-@description('Kubernetes version required by current kagent 1.x installation')
-param kubernetesVersion string = '1.37'
-
-@description('AKS node VM size')
-param nodeVmSize string = 'Standard_D4s_v5'
-
-@description('Initial node count')
-param nodeCount int = 3
-
-resource rg 'Microsoft.Resources/resourceGroups@2025-04-01' = {
-  name: resourceGroupName
-  location: location
+param tags object = {
+  workload: workload
+  environment: environment
+  managedBy: 'bicep'
 }
 
-module acr './modules/acr.bicep' = {
+var suffix = '${workload}-${environment}'
+var uniq = take(uniqueString(resourceGroup().id), 6)
+
+module monitoring 'modules/monitoring.bicep' = if (enableMonitoring) {
+  name: 'monitoring'
+  params: {
+    name: 'log-${suffix}'
+    location: location
+    tags: tags
+    dailyCapGb: logDailyCapGb
+  }
+}
+
+module network 'modules/network.bicep' = {
+  name: 'network'
+  params: {
+    name: 'vnet-${suffix}'
+    location: location
+    tags: tags
+  }
+}
+
+module acr 'modules/acr.bicep' = if (deployAcr) {
   name: 'acr'
-  scope: rg
   params: {
+    name: 'acr${workload}${environment}${uniq}'
     location: location
-    acrName: acrName
+    tags: tags
   }
 }
 
-module aks './modules/aks.bicep' = {
+module aks 'modules/aks.bicep' = {
   name: 'aks'
-  scope: rg
   params: {
+    name: 'aks-${suffix}'
     location: location
-    aksName: aksName
-    acrId: acr.outputs.resourceId
+    tags: tags
+    subnetId: network.outputs.aksSubnetId
+    enableMonitoring: enableMonitoring
+    logAnalyticsId: enableMonitoring ? monitoring!.outputs.workspaceId : ''
     kubernetesVersion: kubernetesVersion
-    nodeVmSize: nodeVmSize
-    nodeCount: nodeCount
+    nodeVmSize: systemNodeVmSize
+    nodeMinCount: systemNodeMinCount
+    nodeMaxCount: systemNodeMaxCount
   }
 }
 
-module githubOidc './modules/github-oidc.bicep' = {
-  name: 'github-oidc'
-  scope: rg
+module openai 'modules/openai.bicep' = {
+  name: 'openai'
   params: {
-    location: location
-    aksName: aksName
-    githubOrganization: githubOrganization
-    githubRepository: githubRepository
-    githubBranch: githubBranch
+    name: 'oai-${suffix}-${uniq}'
+    location: openAiLocation
+    tags: tags
+    modelName: openAiModelName
+    modelVersion: openAiModelVersion
+    capacity: openAiCapacity
   }
 }
 
-output resourceGroupName string = rg.name
-output aksName string = aksName
-output acrName string = acr.outputs.acrName
-output githubFederatedClientId string = githubOidc.outputs.clientId
+module roles 'modules/roles.bicep' = {
+  name: 'roles'
+  params: {
+    aksName: aks.outputs.name
+    acrName: deployAcr ? acr!.outputs.name : ''
+    openAiName: openai.outputs.name
+    kubeletObjectId: aks.outputs.kubeletObjectId
+    deployerPrincipalId: deployerPrincipalId
+  }
+}
+
+output aksName string = aks.outputs.name
+output openAiName string = openai.outputs.name
+output openAiEndpoint string = openai.outputs.endpoint
+output openAiDeployment string = openai.outputs.deploymentName
