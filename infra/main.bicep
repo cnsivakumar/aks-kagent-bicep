@@ -42,7 +42,6 @@ module monitoring 'modules/monitoring.bicep' = if (enableMonitoring) {
     name: 'log-${suffix}'
     location: location
     tags: tags
-    dailyCapGb: logDailyCapGb
   }
 }
 
