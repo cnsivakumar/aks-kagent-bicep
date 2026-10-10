@@ -39,7 +39,7 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Bicep build + lint
+      - name: Bicep build and  lint
         run: |
           az bicep build --file infra/main.bicep --stdout > /dev/null
           az bicep lint  --file infra/main.bicep
