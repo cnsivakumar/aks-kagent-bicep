@@ -11,7 +11,7 @@ param kubernetesVersion string = ''
 
 // ---- cost levers (dev defaults) ----
 @description('Burstable 2 vCPU / 8 GB. Verify availability: az vm list-skus -l <region> --size Standard_B2s_v2')
-param systemNodeVmSize string = 'Standard_B2s_v2'
+param systemNodeVmSize string = 'Standard_D2ls_v6'
 param systemNodeMinCount int = 1
 param systemNodeMaxCount int = 2
 @description('Container Insights ingestion is the usual surprise bill. Off for dev.')
