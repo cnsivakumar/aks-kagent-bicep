@@ -8,7 +8,7 @@ var roleIds = {
   acrPull: '7f951dda-4ed3-4680-a7ca-43fe172d538d'
   aksClusterUser: '4abbcc35-e782-43d8-92c5-2d3f1bd2253f'
   aksRbacClusterAdmin: 'b1ff04bb-8a4e-4dc4-8eb5-8693973ce19b'
-  cognitiveServicesContributor: '25fbc0a9-bd7c-42a3-aa1a-3b75d68dc3bc'
+  cognitiveServicesContributor: '25fbc0a9-bd7c-42a3-aa1a-3b75d497ee68'
 }
 
 resource aks 'Microsoft.ContainerService/managedClusters@2024-09-01' existing = { name: aksName }
